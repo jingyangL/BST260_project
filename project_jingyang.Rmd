@@ -1,0 +1,43 @@
+---
+title: "260_project"
+author: "Jingyang Liu"
+date: "2022-12-16"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(dplyr)
+library("caret")
+library("car")
+library("tidyverse")
+library("patchwork")
+library("ggforce")
+library("factoextra")
+library("ggplot2")
+library("corrplot")
+library("ggExtra")
+library("Metrics")
+library("GGally")
+library("glmnet")
+library('vip')
+library(tidyverse)
+library(parsnip)
+library(recipes)
+library(rsample)
+library(workflows)
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
