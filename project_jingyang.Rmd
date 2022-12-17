@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r}
-library(dplyr)
+library("dplyr")
 library("caret")
 library("car")
 library("tidyverse")
@@ -25,19 +25,274 @@ library("Metrics")
 library("GGally")
 library("glmnet")
 library('vip')
-library(tidyverse)
-library(parsnip)
-library(recipes)
-library(rsample)
-library(workflows)
+library("parsnip")
+library("recipes")
+library("rsample")
+library("workflows")
 
 ```
 
 ```{r}
+# Read Dataset
+data <- read.csv(file = "insurance.csv")
+glimpse(data)
+```
+
+```{r}
+# Clean and filter data
+## To check if there are any duplicated or N/A observations on train dataset.
+cat("Cheking for duplicated rows...","The dataset has",sum(duplicated(data)) , "duplicated rows.\n")
+## Cheking for duplicated rows... The dataset has 1 duplicated rows.
+cat("Checking for NA values...", "The dataset has", sum(is.na(data)), "null values\n")
+## Checking for NA values... The dataset has 0 null values
+### Interpretation:There is one. It’s unlikely that two people have the same age, sex, BMI, and children from the same region, both non-smokers, and have exactly the same medical charges. We can drop this duplicated row.
+cat("\nThe duplicated row is:")
+##
+## The duplicated row is:
+data[duplicated(data),]
+## 	age  sex   bmi children smoker	region  charges
+## 582  19 male 30.59    	0 	no northwest 1639.563
+data <- data %>% distinct()
+```
+
+
+```{r}
+# categorize BMI into 4 common categories: Underweight, Normal, Overweight, Obese
+data$BMI_Category <- "Underweight"
+data$BMI_Category[data$bmi >= 18.5 & data$bmi <= 24.9] <- "Normal"
+data$BMI_Category[data$bmi >= 25 & data$bmi <= 29.9] <- "Overweight"
+data$BMI_Category[data$bmi > 30] <- "Obese"
+
+```
+
+
+```{r}
+# Splitting of train data and X_train data
+## We here split the data into train (80%) and test (20%) using sampling from original data.
+set.seed(42)
+samp <- sample(1:nrow(data), ceiling(0.80*nrow(data)))
+train <- data[samp,]
+test <- data[-samp,]
 
 ```
 
 ```{r}
+#################### lasso regression##################
+#########################################################
+data_lasso=data
+y_Lasso = data_lasso$charges
+xfactors <- model.matrix(charges ~ . , data = data_lasso)[, -1]
+# X_LASSO<- as.matrix(data.frame(data_lasso$bmi,   xfactors))
+lambda_grid <- .5 ^ (-20:20) # lasso
+la = glmnet(xfactors, y_Lasso, family='gaussian', intercept = F, alpha=1,lambda = lambda_grid)
+vip(la, num_features=100, geom="point") #variable importance plot
+```
+
+```{r}
+#################### Full linear regression##################
+#########################################################
+## For starters, let us build the simplest model using all the available features.
+options(scipen = 999)
+l_full <- lm(charges ~ age + sex + bmi + children + smoker + region, data = train)
+summary(l_full)
+l_pred <- predict(l_full, test)
+radj <- summary(l_full)$adj.r.squared
+rse <- sqrt(sum(residuals(l_full)^2) / l_full$df.residual )
+rmse <- RMSE(l_pred, test$charges)
+aic <- AIC(l_full)
+l_reg <- cbind("Adjusted R sq"=radj, "RSE"=rse, "RMSE"=rmse, "AIC"=aic)
+
+```
+
+```{r}
+#################linear regression without sex###############
+#########################################################
+l_nosex <- lm(charges ~ age + bmi + children + smoker + region, data = train)
+summary(l_nosex)
+l_nosex_pred <- predict(l_nosex, test)
+radj <- summary(l_nosex)$adj.r.squared
+rse <- sqrt(sum(residuals(l_nosex)^2) / l_nosex$df.residual )
+rmse <- RMSE(l_nosex_pred, test$charges)
+aic <- AIC(l_nosex)
+l_nosex_reg <- cbind("Adjusted R sq"=radj, "RSE"=rse, "RMSE"=rmse, "AIC"=aic)
+par(mfrow=c(1,3))
+plot(l_nosex, which=c(1,2,3))
+
+```
+
+```{r}
+###############Log linear regression without sex##############
+#########################################################
+train$log_charges <- log(train$charges)
+l_log <- lm(log_charges ~ age + bmi + smoker + children + smoker + region, data = train)
+summary(l_log)
+l_log_pred <- predict(l_log, test)
+radj <- summary(l_log)$adj.r.squared
+rse <- sqrt(sum(residuals(l_log)^2) / l_log$df.residual )
+rmse <- RMSE(l_log_pred, test$charges)
+aic <- AIC(l_log)
+l_log_reg <- cbind("Adjusted R sq"=radj, "RSE"=rse, "RMSE"=rmse, "AIC"=aic)
+par(mfrow=c(1,3))
+plot(l_log, which=c(1,2,3))
+
+```
+
+```{r}
+########## Log linear regression with interaction term ##########
+#########################################################
+train$log_charges <- log(train$charges)
+ 
+l_interaction <- lm(log_charges ~ age + BMI_Category + children + smoker + region +smoker*BMI_Category + smoker*age + smoker*region, data = train)
+summary(l_interaction)
+l_interaction_pred <- predict(l_interaction, test)
+radj <- summary(l_interaction)$adj.r.squared
+rse <- sqrt(sum(residuals(l_interaction)^2) / l_interaction$df.residual )
+rmse <- RMSE(l_interaction_pred, test$charges)
+aic <- AIC(l_interaction)
+l_interaction_reg <- cbind("Adjusted R sq"=radj, "RSE"=rse, "RMSE"=rmse, "AIC"=aic)
+par(mfrow=c(1,3))
+plot(l_interaction, which=c(1,2,3))
+
+```
+```{r}
+library(dplyr)
+library("tidyverse")
+library("patchwork")
+library("ggforce")
+library("factoextra")
+library("ggplot2")
+library("corrplot")
+library("ggExtra")
+library("GGally")
+library(data.table)
+library(glmnet)
+library(vip)
+library(splines)
+library(broom)
+library(splines2)
+library(ResourceSelection)
+library(splitstackshape)
+library(survival)
+library(DescTools)
+library(nnet)
+library(MASS)
+library(VGAM)
+library(ggsci)
+library(ggpubr)
+
+```
+
+
+
+```{r}
+#################Logistic Regression####################
+#########################################################
+ 
+#Lasso regression for smoker
+data_lasso=data
+data_lasso$age = scale(data_lasso$age)
+data_lasso$bmi = scale(data_lasso$bmi)
+data_lasso$charges = scale(data_lasso$charges)
+data_lasso$smoker = scale(data_lasso$smoker)
+y_Lasso = data_lasso$smoker
+xfactors <- model.matrix(smoker ~ . - age- bmi- charges, data =
+                       	data_lasso)[, -1]
+X_LASSO<- as.matrix(data.frame(data_lasso$age, data_lasso$bmi, data_lasso$charges, xfactors))
+lambda_grid <- .5 ^ (-20:20) # lasso
+la = glmnet(X_LASSO, y_Lasso, family='gaussian', intercept = F, alpha=1,lambda = lambda_grid)
+vip(la, num_features=100, geom="point") #variable importance plot
+
+```
+```{r}
+# Splitting of train data and test data
+## We here split the data into train (80%) and test (20%) using sampling from original data.
+set.seed(42)
+ 
+samp <- sample(1:nrow(data), ceiling(0.70*nrow(data)))
+train <- data[samp,]
+test <- data[-samp,]
+
+```
+
+```{r}
+# Logistic regression
+model1<-glm(formula = smoker ~ charges + age,
+        	family = "binomial", data = train)
+summary(model1)
+model2<-glm(formula = smoker ~ charges + age + charges*age,
+        	family = "binomial", data = train)
+summary(model2)
+model3<-glm(formula = smoker ~ charges + age + bmi,
+        	family = "binomial", data = train)
+summary(model3)
+model4<-glm(formula = smoker ~ charges + age + bmi + bmi*charges,
+        	family = "binomial", data = train)
+summary(model4)
+# Point Estimate & 95% Confidence Interval for coefficients in model3
+confint(model3, level=0.95)
+# Effect of significant variables under different genders based on logistics model
+
+```
+```{r}
+## The effect of age on the probability of smoking by gender
+p1 <- ggplot(train, aes(age, smoker, color = sex)) +
+  geom_point(alpha =0.5, position = position_jitter(height =0.02)) +
+  stat_smooth(method = "glm",method.args = list(family=binomial),formula = y~x,alpha=0.1)+
+  labs(title = "The effect of age on the probability of smoking by gender",x="Age",y="Smoker Prob",color="Sex")+
+  scale_color_nejm()+
+  theme_minimal()
+ 
+## The effect of BMI on the probability of smoking by gender
+p2 <- ggplot(train, aes(bmi, smoker, color = sex)) +
+  geom_point(alpha =0.5, position = position_jitter(height =0.02)) +
+  stat_smooth(method = "glm",method.args = list(family=binomial),formula = y~x,alpha=0.1)+
+  labs(title = "The effect of BMI on the probability of smoking by gender",x="BMI",y="Smoker Prob",color="Sex")+
+  scale_color_nejm()+
+  theme_minimal()
+ 
+## The effect of charges on the probability of smoking by gender
+p3 <- ggplot(train, aes(charges, smoker, color = sex)) +
+  geom_point(alpha =0.5, position = position_jitter(height =0.02)) +
+  stat_smooth(method = "glm",method.args = list(family=binomial),formula = y~x,alpha=0.1)+
+  labs(title = "The effect of charges on the probability of smoking by gender",x="Charges",y="Smoker Prob",color="Sex")+
+  scale_color_nejm()+
+  theme_minimal()
+ 
+ggarrange(p1, p2, p3 + rremove("x.text"),
+      	labels = c("A", "B", "C"),
+      	ncol = 1, nrow = 3)
+# Model evaluation
+anova(model3,test = "Chisq")
+anova(model1,model3,test = "Chisq")
+# Plot ROC Curve
+prob<-predict(object =model3,newdata=test,type = "response")
+pred<-ifelse(prob>=0.5,"1","0")
+pred<-factor(pred,levels = c("0","1"),order=TRUE)
+f<-table(test$smoker,pred)
+f
+roc_curve <- roc(test$smoker,prob)
+names(roc_curve)
+x <- 1-roc_curve$specificities
+y <- roc_curve$sensitivities
+ 
+p <- ggplot(data = NULL, mapping = aes(x= x, y = y))
+p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1) + annotate('text', x = 0.4, y = 0.5, label =paste('AUC=',round(roc_curve$auc,2))) + labs(x = '1-specificities',y = 'sensitivities', title = 'ROC Curve')
+auc(roc_curve)
+## Area under the curve: 0.9887
+# Evaluate calibration
+hoslem.test(model3$y,fitted(model3))
+##
+##  Hosmer and Lemeshow goodness of fit (GOF) test
+##
+## data:  model3$y, fitted(model3)
+## X-squared = 14.947, df = 8, p-value = 0.06018
+# Influence plot
+influencePlot(model3,col="red")
+vif(model3)
+cd = cooks.distance(model3)>4/2111
+cooks.distance(model3)[which(cd == TRUE)]
+d <- cooks.distance(model3)[which(cd == TRUE)]
+length(d)
 
 ```
 
